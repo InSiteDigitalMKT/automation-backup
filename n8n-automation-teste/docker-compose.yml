@@ -1,0 +1,92 @@
+volumes:
+    db_storage-teste:
+    n8n_storage-teste:
+    evolution_instances-teste:
+    evolution_redis-teste:
+    postgres_data-teste:
+  
+services:
+    postgres-teste:
+        container_name: postgres-teste
+        image: postgres:16
+        restart: always
+        environment:
+            - POSTGRES_USER=postgres
+            - POSTGRES_PASSWORD=postgres
+        env_file:
+          - .env
+        volumes:
+            - db_storage-teste:/var/lib/postgresql/data
+            - ./docker-postgresql-multiple-databases/create-multiple-postgresql-databases.sh:/docker-entrypoint-initdb.d/create-multiple-postgresql-databases.sh
+        healthcheck:
+            test:
+                [
+                    "CMD-SHELL",
+                    "pg_isready -h localhost -U $POSTGRES_USER -d $POSTGRES_DB",
+                ]
+            interval: 5s
+            timeout: 5s
+            retries: 10
+        networks:
+            - evolution-net-teste
+        expose:
+            - 5432
+
+    n8n-teste:
+        container_name: n8n-teste
+        image: docker.n8n.io/n8nio/n8n:1.95.2
+        restart: always
+        env_file:
+            - .env
+        links:
+            - postgres-teste
+        volumes:
+            - n8n_storage-teste:/home/node/.n8n
+        networks:
+            - evolution-net-teste
+            - evolution-net
+        depends_on:
+            postgres-teste:
+                condition: service_healthy
+        expose:
+            - 5678
+
+    evolution_api-teste:
+        container_name: evolution-teste
+        image: atendai/evolution-api:v2.2.3
+        restart: always
+        depends_on:
+            - redis-teste
+            - postgres-teste
+        volumes:
+            - evolution_instances-teste:/evolution/instances
+        networks:
+            - evolution-net-teste
+            - evolution-net
+        env_file:
+            - .env
+        expose:
+            - 8080
+
+    redis-teste:
+        container_name: redis-teste
+        image: redis:alpine3.21
+        networks:
+            - evolution-net-teste
+        command: >
+            redis-server --port 6379 --appendonly yes
+        volumes:
+            - evolution_redis-teste:/data
+        expose:
+            - 6379
+
+
+networks:
+    evolution-net-teste:
+        name: evolution-net-teste
+        driver: bridge
+        external: true
+    evolution-net:
+      name: evolution-net
+      driver: bridge
+      external: true

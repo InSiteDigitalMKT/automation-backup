@@ -1,0 +1,122 @@
+volumes:
+  db_storage:
+  n8n_storage:
+  evolution_instances:
+  evolution_redis:
+  postgres_data:
+  media:
+  caddy_config:
+  caddy_data:
+  docker-postgresql-multiple-databases:
+  portainer_data:
+  
+services:
+  postgres:
+    image: postgres:16
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      - db_storage:/var/lib/postgresql/data
+      - ./docker-postgresql-multiple-databases/create-multiple-postgresql-databases.sh:/docker-entrypoint-initdb.d/create-multiple-postgresql-databases.sh
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -h localhost -U $POSTGRES_USER -d $POSTGRES_DB",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - evolution-net
+    expose:
+      - 5432
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:1.95.2
+    restart: always
+    env_file:
+      - .env
+    links:
+      - postgres
+    volumes:
+      - n8n_storage:/home/node/.n8n
+    networks:
+      - evolution-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - 5678
+
+  evolution_api:
+    image: atendai/evolution-api:v2.2.3
+    restart: always
+    depends_on:
+      - redis
+      - postgres
+    volumes:
+      - evolution_instances:/evolution/instances
+    networks:
+      - evolution-net
+    env_file:
+      - .env
+    expose:
+      - 8080
+
+  redis:
+    image: redis:alpine3.21
+    networks:
+      - evolution-net
+    command: >
+      redis-server --port 6379 --appendonly yes
+    volumes:
+      - evolution_redis:/data
+    expose:
+      - 6379
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddyfile:/etc/caddy/Caddyfile
+      - media:/n8n/media
+      - media:/n8n-teste/media
+      - media:/evolution/media
+      - media:/evolution-teste/media
+      - media:/portainer/media
+      - caddy_config:/config
+      - caddy_data:/data
+      - ./certs:/certs:ro
+    networks:
+      - evolution-net
+      - evolution-net-teste
+
+  portainer:
+    container_name: portainer
+    image: portainer/portainer-ce:2.31.1-alpine
+    restart: always
+    volumes:
+      - portainer_data:/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - evolution-net
+    expose:
+      - 9000
+    privileged: true
+
+networks:
+  evolution-net:
+    name: evolution-net
+    driver: bridge
+    external: true
+  evolution-net-teste:
+    name: evolution-net-teste
+    driver: bridge
+    external: true
